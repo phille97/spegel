@@ -1,42 +1,61 @@
 package discovery
 
 import (
-	"github.com/grandcat/zeroconf"
-	"os"
+	"context"
+
+	"github.com/godbus/dbus/v5"
+	"github.com/holoplot/go-avahi"
 )
 
 type Server struct {
-	zserver *zeroconf.Server
-
-	hostname string
-	service  string
-	port     int
+	service string
+	port    uint16
 }
 
-func NewServer(service string, port int) (*Server, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, err
-	}
+func NewServer(service string, port uint16) (*Server, error) {
 	return &Server{
-		hostname: hostname,
-		service:  service,
-		port:     port,
+		service: service,
+		port:    port,
 	}, nil
 }
 
-func (s *Server) Register() error {
-	zserver, err := zeroconf.Register(s.hostname, s.service, "local.", s.port, []string{}, nil)
+func (s *Server) Register(ctx context.Context) error {
+	conn, err := dbus.SystemBus()
 	if err != nil {
 		return err
 	}
-	s.zserver = zserver
-	return nil
-}
 
-func (s *Server) Shutdown() {
-	if s.zserver != nil {
-		s.zserver.Shutdown()
-		s.zserver = nil
+	a, err := avahi.ServerNew(conn)
+	if err != nil {
+		return err
 	}
+
+	eg, err := a.EntryGroupNew()
+	if err != nil {
+		return err
+	}
+
+	hostname, err := a.GetHostName()
+	if err != nil {
+		return err
+	}
+
+	fqdn, err := a.GetHostNameFqdn()
+	if err != nil {
+		return err
+	}
+
+	err = eg.AddService(avahi.InterfaceUnspec, avahi.ProtoUnspec, 0, hostname, s.service, "local", fqdn, s.port, nil)
+	if err != nil {
+		return err
+	}
+
+	err = eg.Commit()
+	if err != nil {
+		return err
+	}
+
+	<-ctx.Done()
+
+	return nil
 }

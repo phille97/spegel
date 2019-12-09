@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -33,19 +34,41 @@ func (p *Proxy) HandleProxy(w http.ResponseWriter, r *http.Request) {
 	for _, node := range p.Nodes {
 		nodeUrl := node
 		nodeUrl.Path = path.Join("/get/", vars["path"])
-		resp, err := p.client.Head(nodeUrl.String())
-		if err == nil {
-			if r.Method == "HEAD" {
-				w.WriteHeader(resp.StatusCode)
-				return
-			} else if r.Method == "GET" && resp.StatusCode == http.StatusOK {
-				http.Redirect(w, r, nodeUrl.String(), http.StatusFound)
-				return
+		headResp, err := p.client.Head(nodeUrl.String())
+		if err == nil && headResp.StatusCode == http.StatusOK {
+			req, err := http.NewRequest(r.Method, nodeUrl.String(), r.Body)
+			if err != nil {
+				continue
 			}
+			copyHeaders(req.Header, r.Header)
+
+			resp, err := p.client.Do(req)
+			if err != nil {
+				continue
+			}
+
+			copyHeaders(w.Header(), resp.Header)
+			w.WriteHeader(resp.StatusCode)
+
+			io.Copy(w, resp.Body)
+			resp.Body.Close()
+
+			return
 		}
 	}
 
 	w.WriteHeader(http.StatusNotFound)
 	fmt.Fprint(w, "no backends availible")
 	return
+}
+
+func copyHeaders(dst, src http.Header) {
+	for k := range dst {
+		dst.Del(k)
+	}
+	for k, vs := range src {
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
 }

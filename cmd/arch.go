@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,6 +34,9 @@ var archCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		service := "_arch-spegel-service._tcp"
 
 		handler := proxy.NewProxy()
@@ -49,15 +53,16 @@ var archCmd = &cobra.Command{
 			}
 		}()
 
-		server, err := discovery.NewServer(service, int(listenPort))
+		server, err := discovery.NewServer(service, listenPort)
 		if err != nil {
 			log.Fatal(err)
 		}
-		defer server.Shutdown()
 
-		if err := server.Register(); err != nil {
-			log.Fatal(err)
-		}
+		go func() {
+			if err := server.Register(ctx); err != nil {
+				log.Fatal(err)
+			}
+		}()
 
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
